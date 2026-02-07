@@ -4,6 +4,7 @@ This template is used for **each of the 14 Part B capstone submissions** through
 
 Your goal is not to achieve the best performance, but to **reason carefully about how this week’s machine learning technique applies (or does not apply) to your project**.
 
+GIT REPO: https://github.com/michael-d-abraham/Machine-learning-Standby-Predictor/blob/main/main.py
 ---
 
 ## 1. Project Context (Brief)
