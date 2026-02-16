@@ -20,17 +20,18 @@ Provide the same short context each week so graders can orient quickly.
 
 ## 2. This Week's Technique and Its Assumptions
 
-* **Technique / Model Family Covered This Week:** Linear regression with gradient descent optimization
+* **Technique / Model Family Covered This Week:** Binary classification with logistic regression
 * **Key Assumptions of This Technique:**
-  * Linear relationships between features and target (energy can be modeled as a weighted sum of features)
-  * Gradient descent will converge with a fixed learning rate on standardized features
-  * MSE loss provides meaningful signal for learning feature relationships
+  * Features can distinguish between high and low energy songs (binary decision boundary exists)
+  * Logistic regression can model the probability of high energy given audio features
+  * Class balance is reasonable (not severely imbalanced) for meaningful metrics
+  * Preprocessing pipeline prevents data leakage from validation/test sets
 
 **Fit Assessment (required):**
 
 > I expect this technique to be a **partial** fit for my project because:
 
-Recommendation systems don't naturally have a prediction target. I'm using a proxy task (predicting energy from audio features) to validate that my features contain useful information. This is partial fit because while regression isn't my end goal, it proves the data is ready and helps me understand feature relationships before building the actual similarity-based recommender.
+Recommendation systems don't naturally have a prediction target. I'm using a proxy task (predicting high vs low energy from audio features) to validate that my features contain useful information for categorical decisions. This is partial fit because while classification isn't my end goal, it proves the data is ready and helps me understand how features relate to song characteristics. Classification metrics (precision, recall, F1) provide richer evaluation than regression alone and help validate the feature pipeline for recommendation.
 
 ---
 
@@ -50,9 +51,9 @@ Examples include:
 
 * A proxy task
 
-* **Representation or Proxy Chosen:** Proxy task - predicting energy from other audio features. Each song is a 38-dimensional feature vector (23 scaled numeric features + 15 one-hot encoded categorical features).
+* **Representation or Proxy Chosen:** Proxy task - predicting high energy vs low energy (binary classification). Created binary target by median-splitting continuous energy values. Each song is a 36-dimensional feature vector after preprocessing (23 standardized numeric features + 13 one-hot encoded categorical features from genre and topic).
 
-* **Why this representation was reasonable for this week:** Energy is a core audio characteristic that relates to other features like loudness and acousticness. If the model can learn these relationships, it validates that features contain useful signal for finding similar songs. The standardized numeric representation works well with gradient descent.
+* **Why this representation was reasonable for this week:** Energy is a core audio characteristic that relates to other features like loudness and acousticness. Binary classification exercises the full classification pipeline and validates that features can make categorical decisions. If the model can distinguish high from low energy songs, it validates that features contain useful signal for finding similar songs. The standardized numeric representation works well with logistic regression, and classification metrics provide richer evaluation than regression alone.
 
 ---
 
@@ -61,13 +62,13 @@ Examples include:
 Be concrete and scoped. Do not list everything you *could* have done.
 
 * What you implemented this week
-I built a linear regression baseline that predicts song energy from 38 audio features. Used artist-based group splitting (70/15/15), train-only preprocessing (imputation, standardization, one-hot encoding), and manual gradient descent optimization. Trained for 1000 epochs with learning rate 0.01.
+I built a binary classification baseline that predicts high energy vs low energy songs from 36 audio features. Used artist-based group splitting (70/15/15), scikit-learn pipeline with ColumnTransformer for mixed numeric/categorical preprocessing, and LogisticRegression classifier. Evaluated with full classification metrics (accuracy, precision, recall, F1, ROC AUC, PR AUC), confusion matrices, ROC and Precision-Recall curves, and threshold analysis comparing 0.5 vs 0.4 thresholds.
 
 * What you intentionally did *not* attempt and why
-I did not try nonlinear models or polynomial features - this week is about establishing a simple baseline. I did not use lyrics because they need separate text processing. I did not tune hyperparameters extensively because the goal is a baseline, not optimal performance.
+I did not try nonlinear models or polynomial features - this week is about establishing a simple baseline with proper evaluation. I did not use lyrics because they need separate text processing. I did not extensively tune hyperparameters because the goal is a baseline workflow, not optimal performance. I did not try multi-class classification (genre/topic) because binary classification is the focus this week.
 
 * Any constraints encountered (data, labels, compute, time)
-No natural prediction target since this is a recommendation system, so I used energy as a proxy. Dataset is large (28k songs) but training was fast with batch gradient descent. No missing values in the data, so imputation was precautionary.
+No natural prediction target since this is a recommendation system, so I created a binary target by median-splitting energy. Dataset is large (28k songs) but training was fast with scikit-learn. Classes are balanced (50/50 split), which is ideal for classification metrics. No missing values in the data, so imputation was precautionary.
 
 ---
 
@@ -82,12 +83,14 @@ Examples:
 * Error patterns
 * Unexpected behaviors
 
-- **Test R² = 0.774** (explains 77% of variance in energy) - surprisingly strong for a linear model
-- **Loss reduction: 96.8%** (from 0.399 to 0.013 MSE) - gradient descent worked very well
-- **Train-val gap: 2.1%** - almost no overfitting, excellent generalization
-- **Convergence:** Loss stabilized around epoch 300, stayed flat through 1000 epochs
-- **RMSE: 0.115** on a 0-1 energy scale - predictions are quite accurate
-- Training was smooth with no oscillations or instability at learning rate 0.01
+- **Test Accuracy: 85.6%** - strong performance for binary classification
+- **Test F1-Score: 0.874** - excellent balance between precision and recall
+- **Test ROC AUC: 0.940** - very good discriminative ability
+- **Test PR AUC: 0.947** - strong performance on precision-recall curve
+- **Test Precision: 0.833, Recall: 0.920** (with threshold 0.4) - good recall, acceptable precision
+- **Validation-Test gap: <0.5%** - excellent generalization, no overfitting
+- **Class balance: 50/50** - ideal for classification metrics
+- **Threshold analysis:** Lowering threshold from 0.5 to 0.4 improved F1 (0.853 → 0.857) by increasing recall (+3.9%) with small precision cost (-2.7%)
 
 ---
 
@@ -101,11 +104,11 @@ Reflect on:
 * Which assumptions held or failed
 * What this reveals about your data or problem framing
 
-The strong performance (R²=0.77) proves that audio features contain rich information about song characteristics. The linear assumption held surprisingly well - energy has clear linear relationships with features like loudness and acousticness. Gradient descent converged smoothly because standardization put all features on the same scale, validating the preprocessing choices.
+The strong performance (ROC AUC=0.94, F1=0.87) proves that audio features contain rich information for categorical decisions. The logistic regression assumption held well - features can distinguish high from low energy songs with a clear decision boundary. The balanced classes (50/50) made all metrics meaningful, and the high ROC AUC shows the model has strong discriminative ability.
 
-The tiny train-val gap shows the artist-based split worked as intended. The model learned generalizable patterns, not artist-specific quirks. This is critical validation that leakage prevention didn't hurt performance.
+The tiny validation-test gap (<0.5%) shows the artist-based split worked as intended. The model learned generalizable patterns, not artist-specific quirks. This is critical validation that leakage prevention didn't hurt performance. The threshold analysis revealed that slightly lowering the threshold (0.5 → 0.4) improved F1 by prioritizing recall, which makes sense if we want to catch more high-energy songs.
 
-What this reveals: The feature engineering is solid enough for recommendation. If we can predict energy this accurately, we can definitely use these features to find similar songs. The baseline is strong enough that jumping to complex models might not be necessary - linear similarity search could work well.
+What this reveals: The feature engineering is solid enough for recommendation. If we can classify energy this accurately, we can definitely use these features to find similar songs. Classification metrics provide richer evaluation than regression - precision/recall tell us about the model's decision-making quality, not just prediction accuracy. The strong baseline suggests the features are ready for similarity-based recommendation.
 
 ---
 
@@ -116,9 +119,9 @@ Answer **one** of the following:
 * What will you keep, change, or discard before the next assignment?
 * What would you try next if data or resources were not constrained?
 
-I'll keep the preprocessing pipeline and feature set since they work well. The strong baseline means I can move forward with building the actual recommender using cosine similarity on these same features. 
+I'll keep the preprocessing pipeline and feature set since they work well. The strong classification baseline means I can move forward with building the actual recommender using cosine similarity on these same features. The classification metrics (especially precision/recall) help me understand how well features distinguish song characteristics.
 
-Next step: use the learned weights to understand which features matter most for energy, then build similarity-based retrieval. If unconstrained, I'd add lyrics with TF-IDF, try polynomial features to capture interactions (like loudness × acousticness), and experiment with different proxy tasks to validate other feature relationships.
+Next step: use the learned logistic regression coefficients to understand which features matter most for energy classification, then build similarity-based retrieval. The threshold analysis shows that different decision boundaries can optimize different metrics - this insight applies to recommendation ranking. If unconstrained, I'd add lyrics with TF-IDF, try polynomial features to capture interactions, experiment with multi-class classification (genre/topic), and explore how classification confidence relates to recommendation quality.
 
 ---
 
@@ -130,7 +133,7 @@ If this week's technique was a poor fit, explain:
 * Evidence supporting that conclusion
 * What value this attempt still provided
 
-Not a mismatch - the technique worked well as a proxy task. The only limitation is that regression isn't my actual goal (recommendation is). But predicting energy validated the features and pipeline, which is exactly what a baseline should do. The strong results (R²=0.77) give confidence to move forward with similarity-based recommendation using these same features.
+Not a mismatch - the technique worked well as a proxy task. The only limitation is that classification isn't my actual goal (recommendation is). But classifying energy validated the features and pipeline, which is exactly what a baseline should do. The strong results (ROC AUC=0.94, F1=0.87) give confidence to move forward with similarity-based recommendation using these same features. Classification metrics provide richer evaluation than regression - they tell us about decision quality, not just prediction accuracy, which is valuable for understanding how features relate to song characteristics.
 
 ---
 
