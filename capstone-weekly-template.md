@@ -3,8 +3,6 @@
 This template is used for **each of the 14 Part B capstone submissions** throughout the semester. The structure remains the same every week so that you can focus on *thinking and judgment*, not guessing expectations.
 
 Your goal is not to achieve the best performance, but to **reason carefully about how this week’s machine learning technique applies (or does not apply) to your project**.
-
-GIT REPO: https://github.com/michael-d-abraham/Machine-learning-Standby-Predictor/blob/main/main.py
 ---
 
 ## 1. Project Context (Brief)
@@ -20,18 +18,19 @@ Provide the same short context each week so graders can orient quickly.
 
 ## 2. This Week's Technique and Its Assumptions
 
-* **Technique / Model Family Covered This Week:** Binary classification with logistic regression
+* **Technique / Model Family Covered This Week:** Binary classification with logistic regression and L2 regularization; hyperparameter control via C (inverse regularization strength)
 * **Key Assumptions of This Technique:**
   * Features can distinguish between high and low energy songs (binary decision boundary exists)
-  * Logistic regression can model the probability of high energy given audio features
-  * Class balance is reasonable (not severely imbalanced) for meaningful metrics
-  * Preprocessing pipeline prevents data leakage from validation/test sets
+  * Logistic regression with L2 can model the probability of high energy given audio features
+  * Controlling C lets us diagnose overfitting vs underfitting and tune complexity
+  * Class balance is reasonable (median split gives ~50/50) for meaningful PR-AUC
+  * Preprocessing fit on training only prevents data leakage; artist-group split prevents leakage across splits
 
 **Fit Assessment (required):**
 
 > I expect this technique to be a **partial** fit for my project because:
 
-Recommendation systems don't naturally have a prediction target. I'm using a proxy task (predicting high vs low energy from audio features) to validate that my features contain useful information for categorical decisions. This is partial fit because while classification isn't my end goal, it proves the data is ready and helps me understand how features relate to song characteristics. Classification metrics (precision, recall, F1) provide richer evaluation than regression alone and help validate the feature pipeline for recommendation.
+Recommendation systems don't naturally have a prediction target. I use a proxy task (predicting high vs low energy from audio features) to validate that my features contain useful information and to test whether regularization and complexity control matter in this data regime. This is partial fit because classification isn't my end goal, but diagnosing overfitting and regularization impact tells me whether the representation is stable and ready for similarity-based recommendation. PR-AUC is the primary metric for model selection and validation.
 
 ---
 
@@ -51,9 +50,9 @@ Examples include:
 
 * A proxy task
 
-* **Representation or Proxy Chosen:** Proxy task - predicting high energy vs low energy (binary classification). Created binary target by median-splitting continuous energy values. Each song is a 36-dimensional feature vector after preprocessing (23 standardized numeric features + 13 one-hot encoded categorical features from genre and topic).
+* **Representation or Proxy Chosen:** Proxy task - predicting high energy vs low energy (binary classification). Created binary target by median-splitting continuous energy values using the training-set median. Each song is a 23-dimensional numeric feature vector after preprocessing (audio and topic-proportion features only; no lyrics, identifiers, dates, or categorical metadata). Preprocessing: median imputation (if needed) and StandardScaler; no one-hot encoding this week.
 
-* **Why this representation was reasonable for this week:** Energy is a core audio characteristic that relates to other features like loudness and acousticness. Binary classification exercises the full classification pipeline and validates that features can make categorical decisions. If the model can distinguish high from low energy songs, it validates that features contain useful signal for finding similar songs. The standardized numeric representation works well with logistic regression, and classification metrics provide richer evaluation than regression alone.
+* **Why this representation was reasonable for this week:** Energy is a core audio characteristic. Using numeric features only keeps the setup clean for studying regularization: we control complexity via C only. Median split ensures ~50/50 class balance so PR-AUC is meaningful. If regularization meaningfully changes validation behavior, that informs whether the representation overfits or is stable for recommendation.
 
 ---
 
@@ -62,13 +61,13 @@ Examples include:
 Be concrete and scoped. Do not list everything you *could* have done.
 
 * What you implemented this week
-I built a binary classification baseline that predicts high energy vs low energy songs from 36 audio features. Used artist-based group splitting (70/15/15), scikit-learn pipeline with ColumnTransformer for mixed numeric/categorical preprocessing, and LogisticRegression classifier. Evaluated with full classification metrics (accuracy, precision, recall, F1, ROC AUC, PR AUC), confusion matrices, ROC and Precision-Recall curves, and threshold analysis comparing 0.5 vs 0.4 thresholds.
+I extended the capstone with regularization and hyperparameter control. I added dataset inspection (structure, numeric features, missing values, energy distribution), artist-based 60/20/20 split (seed=42), and a numeric-only pipeline (SimpleImputer, StandardScaler, LogisticRegression with L2). I established a baseline with C=1.0 and diagnosed fit (train vs validation PR-AUC gap). I ran a validation curve over C in {0.001, 0.01, 0.1, 1, 10, 100} with 5-fold CV and PR-AUC, plotted the curve (saved as validation_curve.png), and ran a small grid search over C in {0.01, 0.1, 1, 10} with 5-fold CV. I then compared baseline (C=1.0) vs best C on the test set (used only once), training both on train+validation. I generated reflection diagnostics (regularization impact, overfitting, dataset size, implications for recommendation).
 
 * What you intentionally did *not* attempt and why
-I did not try nonlinear models or polynomial features - this week is about establishing a simple baseline with proper evaluation. I did not use lyrics because they need separate text processing. I did not extensively tune hyperparameters because the goal is a baseline workflow, not optimal performance. I did not try multi-class classification (genre/topic) because binary classification is the focus this week.
+I did not change the model family (only Logistic Regression with L2 as specified). I did not use categorical features (genre, topic) this week so the representation is numeric-only for clear complexity control. I did not touch the test set until the final comparison. I did not maximize performance; the goal was to answer whether regularization matters and whether the representation overfits.
 
 * Any constraints encountered (data, labels, compute, time)
-No natural prediction target since this is a recommendation system, so I created a binary target by median-splitting energy. Dataset is large (28k songs) but training was fast with scikit-learn. Classes are balanced (50/50 split), which is ideal for classification metrics. No missing values in the data, so imputation was precautionary.
+No natural prediction target (recommendation system), so binary energy proxy with median split. Dataset is large (~28k songs); artist-group split gave 60/20/20 with no artist overlap. Classes were ~50/50. No missing values; imputation was precautionary. All tuning and selection used PR-AUC only.
 
 ---
 
@@ -83,14 +82,13 @@ Examples:
 * Error patterns
 * Unexpected behaviors
 
-- **Test Accuracy: 85.6%** - strong performance for binary classification
-- **Test F1-Score: 0.874** - excellent balance between precision and recall
-- **Test ROC AUC: 0.940** - very good discriminative ability
-- **Test PR AUC: 0.947** - strong performance on precision-recall curve
-- **Test Precision: 0.833, Recall: 0.920** (with threshold 0.4) - good recall, acceptable precision
-- **Validation-Test gap: <0.5%** - excellent generalization, no overfitting
-- **Class balance: 50/50** - ideal for classification metrics
-- **Threshold analysis:** Lowering threshold from 0.5 to 0.4 improved F1 (0.853 → 0.857) by increasing recall (+3.9%) with small precision cost (-2.7%)
+- **Baseline (C=1.0) diagnosis:** ACCEPTABLE FIT — train PR-AUC 0.936, validation PR-AUC 0.939, gap −0.003 (small; good generalization)
+- **Validation curve:** C in {0.001, 0.01, 0.1, 1, 10, 100}; best validation PR-AUC at C=10 (~0.933); overfitting observed at C=100 (validation drops while training rises)
+- **Grid search (4 C × 5-fold CV):** Best C=10, mean CV PR-AUC 0.9327; baseline C=1.0 had same CV PR-AUC (0.9327)
+- **Final test (single use):** Baseline (C=1.0) test PR-AUC 0.931; tuned (C=10) test PR-AUC 0.931; change +0.000 — no meaningful difference
+- **Regularization impact:** Minimal — tuning C did not meaningfully change test PR-AUC; baseline was already well-regularized
+- **Class balance:** ~50/50 from median split
+- **Split:** 60/20/20 by artist (seed=42); no artist overlap; ~16.6k train, ~5.6k val, ~6.1k test
 
 ---
 
@@ -104,11 +102,9 @@ Reflect on:
 * Which assumptions held or failed
 * What this reveals about your data or problem framing
 
-The strong performance (ROC AUC=0.94, F1=0.87) proves that audio features contain rich information for categorical decisions. The logistic regression assumption held well - features can distinguish high from low energy songs with a clear decision boundary. The balanced classes (50/50) made all metrics meaningful, and the high ROC AUC shows the model has strong discriminative ability.
+The method behaved as it did because the dataset is large (~28k songs) and the numeric features (after scaling) provide a stable, linearly separable signal for energy. The baseline (C=1.0) already had a negligible train–validation gap, so increasing or decreasing regularization (changing C) did not meaningfully change validation or test PR-AUC. The validation curve showed that at very high C (e.g. 100) some overfitting appears (validation score drops while training score rises), but in the range that mattered for selection (C ≤ 10), performance was flat. So the assumptions that (1) a linear boundary is adequate and (2) default regularization is reasonable for this data regime both held.
 
-The tiny validation-test gap (<0.5%) shows the artist-based split worked as intended. The model learned generalizable patterns, not artist-specific quirks. This is critical validation that leakage prevention didn't hurt performance. The threshold analysis revealed that slightly lowering the threshold (0.5 → 0.4) improved F1 by prioritizing recall, which makes sense if we want to catch more high-energy songs.
-
-What this reveals: The feature engineering is solid enough for recommendation. If we can classify energy this accurately, we can definitely use these features to find similar songs. Classification metrics provide richer evaluation than regression - precision/recall tell us about the model's decision-making quality, not just prediction accuracy. The strong baseline suggests the features are ready for similarity-based recommendation.
+What this reveals: Regularization and complexity control did not change outcomes in a meaningful way — not because the technique was wrong, but because the representation is stable and the dataset size is sufficient. That is academically valid: the answer to "does regularization matter here?" is "no, not in this regime." For the recommender, this implies the numeric feature representation is reliable and ready for similarity-based recommendation; we did not need to regularize more aggressively or simplify the model.
 
 ---
 
@@ -119,9 +115,9 @@ Answer **one** of the following:
 * What will you keep, change, or discard before the next assignment?
 * What would you try next if data or resources were not constrained?
 
-I'll keep the preprocessing pipeline and feature set since they work well. The strong classification baseline means I can move forward with building the actual recommender using cosine similarity on these same features. The classification metrics (especially precision/recall) help me understand how well features distinguish song characteristics.
+I'll keep the numeric-only preprocessing pipeline and the 60/20/20 artist split; the regularization analysis showed they support good generalization. I'll keep using PR-AUC as the primary metric where applicable. I will not change the model family or add heavy regularization by default, since the evidence showed it wasn't needed in this data regime.
 
-Next step: use the learned logistic regression coefficients to understand which features matter most for energy classification, then build similarity-based retrieval. The threshold analysis shows that different decision boundaries can optimize different metrics - this insight applies to recommendation ranking. If unconstrained, I'd add lyrics with TF-IDF, try polynomial features to capture interactions, experiment with multi-class classification (genre/topic), and explore how classification confidence relates to recommendation quality.
+Next step: proceed with similarity-based recommendation using the same numeric features; the stability observed across C supports that. If unconstrained, I would add lyrics (e.g. TF-IDF), try feature selection or dimensionality reduction to see if a smaller feature set behaves similarly, and optionally inspect logistic regression coefficients to see which features drive energy most — that could inform which dimensions to weight in similarity.
 
 ---
 
@@ -133,14 +129,14 @@ If this week's technique was a poor fit, explain:
 * Evidence supporting that conclusion
 * What value this attempt still provided
 
-Not a mismatch - the technique worked well as a proxy task. The only limitation is that classification isn't my actual goal (recommendation is). But classifying energy validated the features and pipeline, which is exactly what a baseline should do. The strong results (ROC AUC=0.94, F1=0.87) give confidence to move forward with similarity-based recommendation using these same features. Classification metrics provide richer evaluation than regression - they tell us about decision quality, not just prediction accuracy, which is valuable for understanding how features relate to song characteristics.
+Not a mismatch. Regularization and hyperparameter control applied cleanly to the proxy task. The finding that regularization did not meaningfully change performance is a valid outcome: it indicates a stable representation and sufficient data, not a poor fit for the technique. The exercise answered the intended questions — whether the representation overfits and whether complexity control matters — and supports moving forward with similarity-based recommendation using these numeric features.
 
 ---
 
 ## Submission Notes
 
 * Written submission format: **Markdown or PDF**
-* Code or notebooks: **optional unless explicitly requested**
+* Code or notebooks: https://github.com/michael-d-abraham/Machine-learning-Standby-Predictor/blob/main/main.py
 * Performance is **not** graded competitively
 * Clear reasoning and honest reflection matter more than results
 
