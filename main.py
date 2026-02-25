@@ -1,37 +1,45 @@
 """
-CS 4320 — Assignment 6 (Part B) Capstone: Regularization & Hyperparameter Control
-Music Recommendation System — Regularization analysis with complexity control
+CS 4320 — Assignments 6 & 7 (Part B) Capstone
+Music Recommendation System — Model Analysis and Comparison
 
-This file extends the classification baseline with rigorous regularization and hyperparameter tuning.
+This file contains:
+1. Assignment 6: Regularization & Hyperparameter Control (Logistic Regression)
+2. Assignment 7: Model Family Comparison (Naive Bayes vs kNN)
+
 The dataset contains songs with metadata and audio features.
 
-PROXY TASK FOR THIS WEEK:
+PROXY TASK:
 Since recommendation systems don't have traditional prediction targets, we use a proxy task:
     Predict whether a song has 'high energy' or 'low energy' (binary classification)
     
-ASSIGNMENT 6 FOCUS: Regularization & Hyperparameter Tuning
+ASSIGNMENT 6: Regularization & Hyperparameter Tuning
 1. Establish baseline model (C=1.0) and diagnose overfitting
 2. Generate validation curves across C values to visualize bias-variance tradeoff
 3. Perform disciplined grid search with 5-fold CV
 4. Compare baseline vs tuned models on test set
 5. Assess whether regularization matters for this dataset/representation
 
+ASSIGNMENT 7: Model Family Comparison
+1. Compare Naive Bayes (generative) vs kNN (instance-based) on same proxy task
+2. Use identical splits, metrics, and preprocessing for fair comparison
+3. Evaluate on validation set to select winner
+4. Perform error analysis to understand failure modes
+5. Test winner once on test set
+
 This is a reasonable proxy because:
-- It exercises model complexity control in a supervised setting
+- It exercises model selection and complexity control in a supervised setting
 - Validates whether features are stable or noisy
-- Tests whether large dataset size (28k songs) makes regularization less critical
-- Insights about overfitting inform similarity-based recommendation design
+- Tests different model assumptions (independence, local similarity, linearity)
+- Insights about model fit inform similarity-based recommendation design
 
 Workflow (leakage-safe):
 1) Inspect dataset structure and identify numeric features
 2) Create binary target (high energy vs low energy, median split from training data)
 3) Split into train/val/test using GROUP-BASED splitting by artist (60/20/20)
-4) Build scikit-learn pipeline with numeric features only
-5) Train baseline model (C=1.0) and diagnose fit quality
-6) Generate validation curve across C values
-7) Perform grid search to select best C
-8) Compare baseline vs tuned on test set (used only once)
-9) Generate diagnostics for capstone reflection
+4) Build scikit-learn pipelines with numeric features only
+5) Assignment 6: Train baseline, validation curve, grid search, test evaluation
+6) Assignment 7: Train NB and kNN variants, compare, error analysis, test evaluation
+7) Generate diagnostics for capstone reflection
 """
 
 import pandas as pd
@@ -41,6 +49,8 @@ from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
+from sklearn.naive_bayes import GaussianNB
+from sklearn.neighbors import KNeighborsClassifier
 from sklearn.model_selection import validation_curve, GridSearchCV
 from sklearn.metrics import (
     confusion_matrix, accuracy_score, precision_score, 
@@ -120,10 +130,7 @@ def inspect_dataset(csv_path):
     duplicates = df.duplicated(subset=['track_name', 'artist_name']).sum()
     print(f"Duplicate songs: {duplicates}")
     if duplicates > 100:
-        print(f"⚠️  WARNING: Found {duplicates} duplicate songs!")
-        response = input("Continue anyway? (y/n): ")
-        if response.lower() != 'y':
-            raise ValueError("Too many duplicates detected. Aborting.")
+        print(f"WARNING: Found {duplicates} duplicate songs. Continuing anyway...")
     
     # Identify numeric columns
     all_numeric_cols = df.select_dtypes(include=['int64', 'float64']).columns.tolist()
@@ -136,10 +143,7 @@ def inspect_dataset(csv_path):
         print(f"  {i:2d}. {col}")
     
     if len(numeric_features) < 10:
-        print(f"⚠️  WARNING: Only {len(numeric_features)} numeric features!")
-        response = input("Continue anyway? (y/n): ")
-        if response.lower() != 'y':
-            raise ValueError("Too few numeric features. Aborting.")
+        print(f"WARNING: Only {len(numeric_features)} numeric features. Continuing anyway...")
     
     # Check missing values
     print(f"\nMissing values:")
@@ -151,10 +155,7 @@ def inspect_dataset(csv_path):
             pct = 100 * count / len(df)
             print(f"  - {col}: {count} ({pct:.2f}%)")
             if pct > 20:
-                print(f"    ⚠️  WARNING: > 20% missing!")
-                response = input("Continue anyway? (y/n): ")
-                if response.lower() != 'y':
-                    raise ValueError(f"Too many missing values in {col}. Aborting.")
+                print(f"    WARNING: > 20% missing. Continuing anyway...")
     
     # Analyze energy distribution
     print(f"\nEnergy distribution:")
@@ -167,12 +168,9 @@ def inspect_dataset(csv_path):
     skew = df[TARGET_COL].skew()
     print(f"  Skew:   {skew:.4f}")
     if abs(skew) > 2:
-        print(f"    ⚠️  WARNING: Highly skewed distribution (|skew| > 2)!")
-        response = input("Continue anyway? (y/n): ")
-        if response.lower() != 'y':
-            raise ValueError("Energy distribution is highly skewed. Aborting.")
+        print(f"    WARNING: Highly skewed distribution (|skew| > 2). Continuing anyway...")
     
-    print(f"\n✓ Dataset inspection complete. Ready to proceed.")
+    print(f"\nDataset inspection complete. Ready to proceed.")
     
     return df, numeric_features
 
@@ -214,14 +212,11 @@ def split_data(df, numeric_features, target_col, seed=42, train_frac=0.60, val_f
     assert len(train_artists & val_artists) == 0, "Artist overlap between train and val!"
     assert len(train_artists & test_artists) == 0, "Artist overlap between train and test!"
     assert len(val_artists & test_artists) == 0, "Artist overlap between val and test!"
-    print("  ✓ Verified: No artist overlap between splits")
+    print("  Verified: No artist overlap between splits")
     
     # Check split percentages
     if len(train_df) / len(df) < 0.10 or len(val_df) / len(df) < 0.10 or len(test_df) / len(df) < 0.10:
-        print("  ⚠️  WARNING: One or more splits has < 10% of data!")
-        response = input("Continue anyway? (y/n): ")
-        if response.lower() != 'y':
-            raise ValueError("Split irregularity detected. Aborting.")
+        print("  WARNING: One or more splits has < 10% of data. Continuing anyway...")
     
     # Create binary target using training set median
     train_energy_median = train_df[target_col].median()
@@ -245,19 +240,16 @@ def split_data(df, numeric_features, target_col, seed=42, train_frac=0.60, val_f
     
     train_balance = train_counts[1] / len(y_train)
     if train_balance < 0.45 or train_balance > 0.55:
-        print(f"    ⚠️  WARNING: Class balance deviates from 50/50 ({train_balance*100:.1f}% positive class)!")
-        response = input("Continue anyway? (y/n): ")
-        if response.lower() != 'y':
-            raise ValueError("Significant class imbalance detected. Aborting.")
+        print(f"    WARNING: Class balance deviates from 50/50 ({train_balance*100:.1f}% positive class). Continuing anyway...")
     
     # Extract numeric features only
     X_train = train_df[numeric_features].copy()
     X_val = val_df[numeric_features].copy()
     X_test = test_df[numeric_features].copy()
     
-    print(f"\n✓ Split complete. Feature matrix shape: ({X_train.shape[0]}, {X_train.shape[1]})")
+    print(f"\nSplit complete. Feature matrix shape: ({X_train.shape[0]}, {X_train.shape[1]})")
     
-    return X_train, X_val, X_test, y_train, y_val, y_test
+    return X_train, X_val, X_test, y_train, y_val, y_test, train_df, val_df, test_df
 
 
 # ==============================================================================
@@ -296,6 +288,40 @@ def build_pipeline(X_train, C=1.0):
     return pipeline
 
 
+# ==============================================================================
+# ASSIGNMENT 7: MODEL BUILDERS FOR NAIVE BAYES AND KNN
+# ==============================================================================
+def build_nb_model():
+    """
+    Build Naive Bayes pipeline for numeric features.
+    
+    Assignment 7: GaussianNB assumes continuous features with Gaussian distribution.
+    StandardScaler is included for consistency with kNN comparison, though not strictly
+    required for Naive Bayes. May help if features aren't perfectly Gaussian.
+    """
+    pipeline = Pipeline(steps=[
+        ('imputer', SimpleImputer(strategy='median')),
+        ('scaler', StandardScaler()),
+        ('classifier', GaussianNB())
+    ])
+    return pipeline
+
+
+def build_knn_model(k=5):
+    """
+    Build k-Nearest Neighbors pipeline for numeric features.
+    
+    Assignment 7: StandardScaler is MANDATORY for kNN since it's distance-based.
+    Without scaling, features with larger ranges would dominate distance calculations.
+    """
+    pipeline = Pipeline(steps=[
+        ('imputer', SimpleImputer(strategy='median')),
+        ('scaler', StandardScaler()),
+        ('classifier', KNeighborsClassifier(n_neighbors=k, n_jobs=-1))
+    ])
+    return pipeline
+
+
 def evaluate_metrics(y_true, y_pred, y_pred_proba, dataset_name="Validation"):
     """
     Compute and display classification metrics.
@@ -315,7 +341,7 @@ def evaluate_metrics(y_true, y_pred, y_pred_proba, dataset_name="Validation"):
     print(f"Recall:    {recall:.4f}")
     print(f"F1-Score:  {f1:.4f}")
     print(f"ROC AUC:   {roc_auc:.4f}")
-    print(f"PR AUC:    {pr_auc:.4f} ⭐ (PRIMARY METRIC)")
+    print(f"PR AUC:    {pr_auc:.4f} (PRIMARY METRIC)")
     
     return {
         'accuracy': accuracy,
@@ -611,7 +637,7 @@ def final_model_evaluation(best_C, X_train, X_val, X_test, y_train, y_val, y_tes
     print("PHASE 7: FINAL MODEL EVALUATION (BASELINE VS TUNED)")
     print("=" * 80)
     
-    print(f"\n⚠️  Using test set for first time!")
+    print(f"\nNOTE: Using test set for Assignment 6 evaluation (baseline vs tuned regularization).")
     
     # Combine train+val for final training
     X_train_final = pd.concat([X_train, X_val], axis=0)
@@ -664,7 +690,7 @@ def final_model_evaluation(best_C, X_train, X_val, X_test, y_train, y_val, y_tes
         
         # Highlight PR-AUC (primary metric)
         if metric == 'pr_auc':
-            print(f"{metric.upper():<15} {baseline_val:<18.4f} {tuned_val:<18.4f} {change:+.4f} ⭐ (PRIMARY)")
+            print(f"{metric.upper():<15} {baseline_val:<18.4f} {tuned_val:<18.4f} {change:+.4f} (PRIMARY)")
         else:
             print(f"{metric.upper():<15} {baseline_val:<18.4f} {tuned_val:<18.4f} {change:+.4f}")
     
@@ -911,6 +937,357 @@ def generate_reflection_diagnostics(diagnosis, best_C, comparison, train_metrics
 
 
 # ==============================================================================
+# ASSIGNMENT 7: MODEL FAMILY COMPARISON (NAIVE BAYES VS KNN)
+# ==============================================================================
+def run_assignment7_model_family_comparison(X_train, y_train, X_val, y_val, X_test, y_test, train_df, val_df, test_df):
+    """
+    Assignment 7: Compare Naive Bayes vs k-Nearest Neighbors on the same proxy task.
+    
+    Goal: Careful reasoning about tradeoffs, not performance maximization.
+    
+    Steps:
+    1. Train and evaluate Naive Bayes on validation
+    2. Train and evaluate kNN with multiple k values on validation
+    3. Create comparison table
+    4. Select winner based on validation PR-AUC
+    5. Evaluate winner on test set (used only once)
+    6. Perform error analysis
+    """
+    print("\n" + "=" * 80)
+    print("ASSIGNMENT 7: MODEL FAMILY COMPARISON (NAIVE BAYES VS KNN)")
+    print("=" * 80)
+    
+    print("\nGoal: Compare TWO model families on the same proxy task:")
+    print("  (1) Generative classifier: Naive Bayes (GaussianNB)")
+    print("  (2) Instance-based classifier: k-Nearest Neighbors (kNN)")
+    print("\nFocus: Reasoning about tradeoffs and fit for this project, not maximizing performance.")
+    
+    # Store results for comparison
+    results = []
+    
+    # ==============================================================================
+    # STEP 1: TRAIN AND EVALUATE NAIVE BAYES
+    # ==============================================================================
+    print("\n" + "-" * 80)
+    print("STEP 1: NAIVE BAYES (GaussianNB)")
+    print("-" * 80)
+    
+    print("\nNaive Bayes assumptions:")
+    print("  - Feature independence (features don't correlate)")
+    print("  - Gaussian (normal) distribution for each feature")
+    print("  - Probabilistic model: P(y|X) ∝ P(X|y) * P(y)")
+    
+    print(f"\nTraining Naive Bayes on {len(X_train)} samples...")
+    nb_pipeline = build_nb_model()
+    nb_pipeline.fit(X_train, y_train)
+    
+    print("Evaluating on validation set...")
+    y_val_pred_nb = nb_pipeline.predict(X_val)
+    y_val_proba_nb = nb_pipeline.predict_proba(X_val)[:, 1]
+    nb_metrics = evaluate_metrics(y_val, y_val_pred_nb, y_val_proba_nb, dataset_name="Validation (Naive Bayes)")
+    
+    results.append({
+        'Model': 'Naive Bayes',
+        'Hyperparameters': 'GaussianNB (default)',
+        'PR-AUC': nb_metrics['pr_auc'],
+        'F1': nb_metrics['f1'],
+        'Accuracy': nb_metrics['accuracy'],
+        'pipeline': nb_pipeline,
+        'predictions': y_val_pred_nb,
+        'probabilities': y_val_proba_nb
+    })
+    
+    # ==============================================================================
+    # STEP 2: TRAIN AND EVALUATE KNN WITH MULTIPLE K VALUES
+    # ==============================================================================
+    print("\n" + "-" * 80)
+    print("STEP 2: K-NEAREST NEIGHBORS (kNN)")
+    print("-" * 80)
+    
+    print("\nkNN assumptions:")
+    print("  - Local similarity: nearby points in feature space have similar labels")
+    print("  - Distance-based: Euclidean distance (requires scaling!)")
+    print("  - Non-parametric: decision boundary adapts to local data density")
+    
+    # Test multiple k values
+    k_values = [3, 11, 51]
+    print(f"\nTesting k values: {k_values}")
+    print("  - k=3:  Small neighborhood (sensitive to local noise)")
+    print("  - k=11: Medium neighborhood (balanced)")
+    print("  - k=51: Large neighborhood (smoother decision boundary)")
+    
+    for k in k_values:
+        print(f"\n  Training kNN with k={k}...")
+        knn_pipeline = build_knn_model(k=k)
+        knn_pipeline.fit(X_train, y_train)
+        
+        print(f"  Evaluating kNN (k={k}) on validation set...")
+        y_val_pred_knn = knn_pipeline.predict(X_val)
+        y_val_proba_knn = knn_pipeline.predict_proba(X_val)[:, 1]
+        knn_metrics = evaluate_metrics(y_val, y_val_pred_knn, y_val_proba_knn, 
+                                       dataset_name=f"Validation (kNN k={k})")
+        
+        results.append({
+            'Model': f'kNN',
+            'Hyperparameters': f'k={k}',
+            'PR-AUC': knn_metrics['pr_auc'],
+            'F1': knn_metrics['f1'],
+            'Accuracy': knn_metrics['accuracy'],
+            'pipeline': knn_pipeline,
+            'predictions': y_val_pred_knn,
+            'probabilities': y_val_proba_knn
+        })
+    
+    # ==============================================================================
+    # STEP 3: COMPARISON TABLE
+    # ==============================================================================
+    print("\n" + "=" * 80)
+    print("VALIDATION SET COMPARISON")
+    print("=" * 80)
+    
+    print(f"\n{'Model':<15} {'Hyperparameters':<25} {'PR-AUC':<10} {'F1':<10} {'Accuracy':<10}")
+    print("-" * 80)
+    
+    for result in results:
+        print(f"{result['Model']:<15} {result['Hyperparameters']:<25} "
+              f"{result['PR-AUC']:<10.4f} {result['F1']:<10.4f} {result['Accuracy']:<10.4f}")
+    
+    # Save comparison table as CSV
+    comparison_df = pd.DataFrame([
+        {
+            'Model': r['Model'],
+            'Hyperparameters': r['Hyperparameters'],
+            'PR-AUC': r['PR-AUC'],
+            'F1': r['F1'],
+            'Accuracy': r['Accuracy']
+        }
+        for r in results
+    ])
+    comparison_df.to_csv('assignment7_comparison.csv', index=False)
+    print(f"\n  Saved: assignment7_comparison.csv")
+    
+    # Plot k vs PR-AUC for kNN
+    knn_results = [r for r in results if r['Model'] == 'kNN']
+    if len(knn_results) > 0:
+        k_vals = [int(r['Hyperparameters'].split('=')[1]) for r in knn_results]
+        pr_aucs = [r['PR-AUC'] for r in knn_results]
+        
+        plt.figure(figsize=(8, 5))
+        plt.plot(k_vals, pr_aucs, 'o-', linewidth=2, markersize=8)
+        plt.xlabel('k (number of neighbors)', fontsize=11)
+        plt.ylabel('PR-AUC (Validation)', fontsize=11)
+        plt.title('kNN: k vs PR-AUC', fontsize=12, fontweight='bold')
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig('assignment7_knn_k_curve.png', dpi=150)
+        plt.close()
+        print(f"  Saved: assignment7_knn_k_curve.png")
+    
+    # ==============================================================================
+    # STEP 4: SELECT WINNER
+    # ==============================================================================
+    print("\n" + "=" * 80)
+    print("WINNER SELECTION (BASED ON VALIDATION PR-AUC)")
+    print("=" * 80)
+    
+    # Find best model by validation PR-AUC
+    best_idx = max(range(len(results)), key=lambda i: results[i]['PR-AUC'])
+    winner = results[best_idx]
+    
+    print(f"\nWINNER: {winner['Model']} ({winner['Hyperparameters']})")
+    print(f"   Validation PR-AUC: {winner['PR-AUC']:.4f}")
+    print(f"   Validation F1:     {winner['F1']:.4f}")
+    print(f"   Validation Accuracy: {winner['Accuracy']:.4f}")
+    
+    # Compare to others
+    print(f"\nComparison to other models:")
+    for i, result in enumerate(results):
+        if i != best_idx:
+            pr_auc_diff = winner['PR-AUC'] - result['PR-AUC']
+            print(f"  - {result['Model']} ({result['Hyperparameters']}): "
+                  f"PR-AUC = {result['PR-AUC']:.4f} (Δ = {pr_auc_diff:+.4f})")
+    
+    # ==============================================================================
+    # STEP 5: ONE-TIME TEST EVALUATION FOR ASSIGNMENT 7
+    # ==============================================================================
+    print("\n" + "=" * 80)
+    print("FINAL TEST EVALUATION FOR ASSIGNMENT 7 MODEL COMPARISON")
+    print("=" * 80)
+    
+    print(f"\nNOTE: Test set used for Assignment 7 model family comparison.")
+    print(f"(Assignment 6 already used test set for regularization comparison.)")
+    print(f"\nRetraining winner on train+val combined...")
+    
+    # Combine train and val for final training
+    X_train_final = pd.concat([X_train, X_val], axis=0)
+    y_train_final = pd.concat([y_train, y_val], axis=0)
+    
+    print(f"  Training set size: {len(X_train_final)} samples (train+val)")
+    print(f"  Test set size: {len(X_test)} samples")
+    
+    # Retrain winner on train+val
+    if winner['Model'] == 'Naive Bayes':
+        final_pipeline = build_nb_model()
+    else:
+        # Extract k from hyperparameters string
+        k = int(winner['Hyperparameters'].split('=')[1])
+        final_pipeline = build_knn_model(k=k)
+    
+    final_pipeline.fit(X_train_final, y_train_final)
+    
+    # Evaluate on test set
+    y_test_pred = final_pipeline.predict(X_test)
+    y_test_proba = final_pipeline.predict_proba(X_test)[:, 1]
+    test_metrics = evaluate_metrics(y_test, y_test_pred, y_test_proba, 
+                                   dataset_name=f"Test ({winner['Model']} {winner['Hyperparameters']})")
+    
+    print(f"\nTest vs Validation Comparison for Winner:")
+    print(f"{'Metric':<15} {'Validation':<12} {'Test':<12} {'Change':<12}")
+    print("-" * 50)
+    for metric in ['pr_auc', 'f1', 'accuracy']:
+        # Map metric names to result dictionary keys
+        if metric == 'pr_auc':
+            val_val = winner['PR-AUC']
+        elif metric == 'f1':
+            val_val = winner['F1']
+        elif metric == 'accuracy':
+            val_val = winner['Accuracy']
+        test_val = test_metrics[metric]
+        change = test_val - val_val
+        print(f"{metric.upper():<15} {val_val:<12.4f} {test_val:<12.4f} {change:+.4f}")
+    
+    # ==============================================================================
+    # STEP 6: ERROR ANALYSIS
+    # ==============================================================================
+    print("\n" + "=" * 80)
+    print("ERROR ANALYSIS ON VALIDATION SET")
+    print("=" * 80)
+    
+    print("\nAnalyzing where models fail and why...")
+    
+    # Use winner's predictions for error analysis
+    winner_preds = winner['predictions']
+    winner_probs = winner['probabilities']
+    
+    # Identify errors
+    errors = winner_preds != y_val
+    false_positives = (winner_preds == 1) & (y_val == 0)
+    false_negatives = (winner_preds == 0) & (y_val == 1)
+    
+    print(f"\nError Summary:")
+    print(f"  Total validation samples: {len(y_val)}")
+    print(f"  Correct predictions: {(~errors).sum()} ({100*(~errors).sum()/len(y_val):.1f}%)")
+    print(f"  Errors: {errors.sum()} ({100*errors.sum()/len(y_val):.1f}%)")
+    print(f"    - False Positives (predicted High, actually Low): {false_positives.sum()}")
+    print(f"    - False Negatives (predicted Low, actually High): {false_negatives.sum()}")
+    
+    # Extract example mistakes
+    print(f"\n" + "-" * 80)
+    print("REPRESENTATIVE MISTAKES")
+    print("-" * 80)
+    
+    # False Positives
+    print("\n1. FALSE POSITIVES (Predicted High Energy, Actually Low Energy):")
+    print("   These songs were predicted as high energy but are actually low energy.\n")
+    
+    fp_indices = val_df.index[false_positives][:5]
+    if len(fp_indices) > 0:
+        print(f"{'Artist':<25} {'Track':<40} {'True':<6} {'Pred':<6} {'Prob':<6}")
+        print("-" * 85)
+        for idx in fp_indices:
+            artist = str(val_df.loc[idx, 'artist_name'])[:24] if 'artist_name' in val_df.columns else 'N/A'
+            track = str(val_df.loc[idx, 'track_name'])[:39] if 'track_name' in val_df.columns else 'N/A'
+            true_label = int(y_val.loc[idx])
+            pred_label = int(winner_preds[y_val.index.get_loc(idx)])
+            prob = float(winner_probs[y_val.index.get_loc(idx)])
+            print(f"{artist:<25} {track:<40} {true_label:<6} {pred_label:<6} {prob:<6.3f}")
+    else:
+        print("   No false positives found.")
+    
+    print("\n   Why these errors occur:")
+    if winner['Model'] == 'Naive Bayes':
+        print("   • Naive Bayes assumes feature independence, but audio features often correlate")
+        print("   • Assumes Gaussian distributions, which may not hold for all features")
+        print("   • May misclassify songs near the decision boundary due to rigid assumptions")
+    else:
+        print("   • kNN suffers from curse of dimensionality (23 features)")
+        print("   • Local neighborhoods may contain mixed classes in high-D space")
+        print("   • Sensitive to noise and outliers in the feature space")
+    
+    # False Negatives
+    print("\n2. FALSE NEGATIVES (Predicted Low Energy, Actually High Energy):")
+    print("   These songs were predicted as low energy but are actually high energy.\n")
+    
+    fn_indices = val_df.index[false_negatives][:5]
+    if len(fn_indices) > 0:
+        print(f"{'Artist':<25} {'Track':<40} {'True':<6} {'Pred':<6} {'Prob':<6}")
+        print("-" * 85)
+        for idx in fn_indices:
+            artist = str(val_df.loc[idx, 'artist_name'])[:24] if 'artist_name' in val_df.columns else 'N/A'
+            track = str(val_df.loc[idx, 'track_name'])[:39] if 'track_name' in val_df.columns else 'N/A'
+            true_label = int(y_val.loc[idx])
+            pred_label = int(winner_preds[y_val.index.get_loc(idx)])
+            prob = float(winner_probs[y_val.index.get_loc(idx)])
+            print(f"{artist:<25} {track:<40} {true_label:<6} {pred_label:<6} {prob:<6.3f}")
+    else:
+        print("   No false negatives found.")
+    
+    print("\n   Why these errors occur:")
+    if winner['Model'] == 'Naive Bayes':
+        print("   • Independence assumption violated by correlated audio features")
+        print("   • Non-Gaussian feature distributions lead to poor probability estimates")
+        print("   • Model may be too simple for complex energy patterns")
+    else:
+        print("   • High-dimensional space makes 'nearest' neighbors not truly nearby")
+        print("   • Boundary songs may have neighbors from the wrong class")
+        print("   • Scaling doesn't eliminate all curse-of-dimensionality effects")
+    
+    # ==============================================================================
+    # SUMMARY AND INSIGHTS
+    # ==============================================================================
+    print("\n" + "=" * 80)
+    print("KEY TAKEAWAYS")
+    print("=" * 80)
+    
+    print(f"\n1. WINNER: {winner['Model']} ({winner['Hyperparameters']})")
+    print(f"   - Validation PR-AUC: {winner['PR-AUC']:.4f}")
+    print(f"   - Test PR-AUC: {test_metrics['pr_auc']:.4f}")
+    
+    print("\n2. MODEL FAMILY TRADEOFFS:")
+    if winner['Model'] == 'Naive Bayes':
+        print("   Naive Bayes strengths:")
+        print("   • Fast training and prediction")
+        print("   • Probabilistic interpretation")
+        print("   • Works well with limited data")
+        print("   Naive Bayes weaknesses:")
+        print("   • Strong independence assumption often violated")
+        print("   • Assumes Gaussian distributions")
+        print("   • Rigid decision boundaries")
+    else:
+        print("   kNN strengths:")
+        print("   • No training phase (lazy learning)")
+        print("   • Non-parametric (flexible decision boundary)")
+        print("   • Intuitive: similar songs should have similar energy")
+        print("   kNN weaknesses:")
+        print("   • Curse of dimensionality in high-D spaces")
+        print("   • Slow prediction (searches all training points)")
+        print("   • Sensitive to noisy features and outliers")
+    
+    print("\n3. IMPLICATIONS FOR RECOMMENDATION SYSTEM:")
+    print("   • Proxy task validates feature quality for similarity-based recommendation")
+    print("   • Scaling is critical for distance-based methods")
+    print("   • High dimensionality (23 features) may require dimensionality reduction")
+    print("   • Feature correlations suggest PCA or feature selection could help")
+    
+    return {
+        'winner': winner,
+        'all_results': results,
+        'test_metrics': test_metrics,
+        'comparison_df': comparison_df
+    }
+
+
+# ==============================================================================
 # MAIN WORKFLOW
 # ==============================================================================
 def main():
@@ -937,7 +1314,7 @@ def main():
     df, numeric_features = inspect_dataset(CSV_PATH)
     
     # Phase 2: Proxy Target Construction (60/20/20 split with seed=42)
-    X_train, X_val, X_test, y_train, y_val, y_test = split_data(
+    X_train, X_val, X_test, y_train, y_val, y_test, train_df, val_df, test_df = split_data(
         df, numeric_features, TARGET_COL, seed=SEED, train_frac=0.60, val_frac=0.20
     )
     
@@ -996,6 +1373,19 @@ def main():
         train_metrics, val_metrics,
         baseline_test_metrics, tuned_test_metrics,
         overfitting_detected, len(df)
+    )
+    
+    # ==============================================================================
+    # ASSIGNMENT 7: MODEL FAMILY COMPARISON (NAIVE BAYES VS KNN)
+    # ==============================================================================
+    print("\n" + "=" * 80)
+    print("STARTING ASSIGNMENT 7: MODEL FAMILY COMPARISON")
+    print("=" * 80)
+    
+    # Run Assignment 7 comparison
+    assignment7_results = run_assignment7_model_family_comparison(
+        X_train, y_train, X_val, y_val, X_test, y_test,
+        train_df, val_df, test_df
     )
     
     # Final Summary
