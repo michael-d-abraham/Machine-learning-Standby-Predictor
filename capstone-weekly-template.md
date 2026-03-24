@@ -19,19 +19,18 @@ Provide the same short context each week so graders can orient quickly.
 
 ## 2. This Week's Technique and Its Assumptions
 
-* **Technique / Model Family Covered This Week:** Support Vector Machine (SVM) with linear and RBF kernels; interpretability via decision function and linear weights
+* **Technique / Model Family Covered This Week:** Unsupervised learning with PCA and k-means clustering
 * **Key Assumptions of This Technique:**
-  * Margin maximization: SVM finds a decision boundary that maximizes the margin between classes
-  * Scaling is required (distance-based); C controls margin hardness, gamma (RBF) controls flexibility
-  * Linear kernel: interpretable feature weights (coefficients)
-  * RBF kernel: no direct weights; flexible boundary
-  * class_weight: None or balanced to handle class imbalance if present
+  * PCA captures major variance directions but does not prove natural classes
+  * k-means assumes centroid-based groups and Euclidean-distance structure
+  * Standardized features are important so one feature does not dominate distance
+  * Musical structure may overlap and be continuous, so weak clustering can still be informative
 
 **Fit Assessment (required):**
 
-> I expect this technique to be a **partial** fit for my project because:
+> I expected this technique to be a **partial** fit for my project because:
 
-The recommender is not a classifier, but the proxy task (high vs low energy) assesses whether the feature representation supports discrimination. SVM with ROC AUC indicates how well the features separate the two classes. This informs whether the representation is useful for similarity-based recommendation. Linear SVM also gives interpretable coefficients, which helps understand which features drive the boundary.
+My capstone goal is recommendation, not hard class prediction. Unsupervised methods are still useful for checking whether the current feature space has visible structure, gradients, or diffuse overlap. Even if cluster separation is weak, that outcome helps evaluate whether recommendation should emphasize similarity/ranking rather than strict segmentation.
 
 ---
 
@@ -51,9 +50,9 @@ Examples include:
 
 * A proxy task
 
-* **Representation or Proxy Chosen:** Same proxy task: high energy vs low energy (binary classification) from training-set median split. Each song is a 23-dimensional numeric feature vector (audio and topic-proportion features). Preprocessing: SimpleImputer (median) then StandardScaler.
+* **Representation or Proxy Chosen:** Unsupervised feature matrix built from 23 numeric song-level features only. Excluded columns: `Unnamed: 0`, `artist_name`, `track_name`, `lyrics`, `genre`, `topic`, `release_date`, and `energy` (target/proxy source). Preprocessing: SimpleImputer (median) then StandardScaler.
 
-* **Why this representation was reasonable for this week:** SVM requires scaled features. The proxy task tests whether the representation supports a clear decision boundary. Median split keeps class balance roughly even. StandardScaler ensures fair contribution of all features to the SVM margin.
+* **Why this representation was reasonable for this week:** PCA and k-means both rely on numeric feature geometry, so scaling is required. Excluding text/meta/identifier columns and `energy` keeps the unsupervised matrix leakage-safe and aligned with project conventions. The existing high/low-energy proxy label was created separately from train median and used only post hoc for interpretation.
 
 ---
 
@@ -62,13 +61,13 @@ Examples include:
 Be concrete and scoped. Do not list everything you *could* have done.
 
 * What you implemented this week
-Pipeline: SimpleImputer (median) -> StandardScaler -> SVC. Used RandomizedSearchCV (n_iter=25, cv=5, scoring=roc_auc) over kernel, C, gamma, and class_weight. Fit on train only; evaluated on validation then test once. Added interpretability: decision_function (signed distance to hyperplane), linear SVM coefficients for feature importance, and a 2D PCA plot of validation set colored by decision score to visualize boundary and overlap.
+Built a scoped unsupervised workflow in `main_unsupervised_a10.py`: load data, define included/excluded columns, preprocess with median imputation + scaling, run PCA, and run k-means for multiple k values (`k=2..7`) with inertia and silhouette reporting. Produced plots (explained variance, PCA scatter by cluster, PCA scatter by proxy label, elbow, silhouette). For selected k, generated cluster size and feature-profile summaries using standardized mean differences.
 
 * What you intentionally did *not* attempt and why
-Did not do exhaustive grid search; RandomizedSearchCV with 25 iterations kept compute reasonable. Did not add SHAP or other post-hoc interpretability this week; used built-in linear weights and decision scores. Did not change the proxy task or split; kept 60/20/20 artist-based and median-split energy.
+Did not use deep learning or advanced clustering variants (GMM/DBSCAN/spectral) to keep scope student-readable and aligned with assignment instructions. Did not use the proxy label in fitting PCA or k-means. Did not treat clustering as a replacement for supervised proxy evaluation.
 
 * Any constraints encountered (data, labels, compute, time)
-No natural prediction target (recommendation system), so binary energy proxy. SVM fit and search take longer than linear models; RandomizedSearchCV with 25 iterations was a practical limit. Artist-group split; no artist overlap. Test set used only once for final evaluation.
+Recommendation has no single ground-truth label, so unsupervised evaluation is inherently indirect. k-means quality metrics were modest, which limits strong segmentation claims. Matplotlib cache/font warnings appeared in this environment but did not block output generation.
 
 ---
 
@@ -83,21 +82,30 @@ Examples:
 * Error patterns
 * Unexpected behaviors
 
-**Best hyperparameters (from RandomizedSearchCV):**
-- kernel: linear
-- C: ~8.86
-- gamma: ~0.00043 (used for search space; linear kernel does not use gamma in decision)
-- class_weight: None
+**PCA variance structure (first 10 components):**
+- PC1: 0.1203
+- PC2: 0.0756
+- Cumulative variance by PC10: 0.5938
 
-**Validation:** ROC AUC 0.9422  
-**Test (one-time):** ROC AUC 0.9379
+**k-means sweep (`k=2..7`):**
+- k=2: silhouette 0.0867
+- k=3: silhouette 0.0729
+- k=4: silhouette 0.0771
+- k=5: silhouette 0.0877
+- k=6: silhouette 0.1044
+- k=7: silhouette 0.1157 (best among tested)
 
-**Test confusion matrix:** TN=2746, FP=466, FN=412, TP=2517
+**Selected k:** 7 (based on highest tested silhouette, while noting absolute values are low)
 
-**Interpretability outputs:**
-- decision_function: signed distance to hyperplane; larger magnitude means more confident prediction
-- Linear weights: top coefficients printed for feature importance
-- PCA plot: 2D projection of validation set colored by decision score; shows overlap and boundary softness
+**Post hoc cluster vs proxy-energy agreement (interpretive only):**
+- NMI: 0.0301
+- ARI: 0.0216
+
+**Qualitative cluster-profile examples (standardized means):**
+- One cluster was high in `romantic` (+3.210), with higher `acousticness` and older `age`
+- One cluster was high in `music` (+2.776)
+- One cluster was high in `night/time` (+3.000)
+- One cluster was high in `obscene` (+1.936) and `danceability`
 
 ---
 
@@ -113,17 +121,17 @@ Reflect on:
 
 **Why the method behaved as it did:**
 
-Linear kernel won in search: it gives an interpretable boundary and avoids overfitting in the 23-dimensional space. High validation and test ROC AUC (0.94+) show the features separate high vs low energy well. The small drop from val to test (0.9422 to 0.9379) suggests good generalization.
+PCA spread variance across many components instead of concentrating it strongly in the first two. k-means produced only low silhouette values across all tested k, with the best at k=7 still weak in absolute terms. This suggests the feature space has overlapping or gradient-like structure rather than cleanly separable groups.
 
 **Interpretability:**
 
-- decision_function: signed distance to hyperplane; useful for confidence and for understanding how far points are from the boundary
-- Linear weights: coefficient magnitude indicates which features push the decision toward high or low energy; supports feature importance reasoning
-- PCA plot: 2D view of validation set by decision score shows where classes overlap and where the boundary is soft
+- PCA plots gave an interpretable low-dimensional view of overlap and diffuse structure
+- Cluster profiles still provided useful broad musical tendencies (e.g., romantic/acoustic, night/time-heavy, danceable/obscene profiles)
+- Post hoc label agreement stayed very low (NMI/ARI near zero), indicating clusters are not just re-encoding the high/low-energy proxy
 
 **What this reveals:**
 
-The representation supports strong discrimination (high ROC AUC). Linear SVM is sufficient; RBF did not win, which is consistent with 23 features and possible curse of dimensionality. The proxy task confirms the features are useful for distinguishing energy level, which supports using them for similarity-based recommendation.
+Unsupervised learning is a **partial fit**: useful for exploration and diagnostics, but weak as a standalone segmentation strategy. The results support framing recommendation more as similarity/ranking in feature space than hard cluster assignment. Weak clustering is still informative because it exposes limitations in the assumption that songs naturally split into clear groups.
 
 ---
 
@@ -134,11 +142,11 @@ Answer **one** of the following:
 * What will you keep, change, or discard before the next assignment?
 * What would you try next if data or resources were not constrained?
 
-I'll keep the preprocessing pipeline (median imputation, StandardScaler) and the 60/20/20 artist split. Linear SVM and its coefficients stay useful for interpretability.
+I'll keep the same preprocessing (median imputation + StandardScaler) and leakage-safe split philosophy. I will keep using PCA/clustering as exploratory diagnostics rather than primary recommender logic.
 
-**Limitations:** 23 features is high-dimensional; RBF may overfit in this space. Consider PCA or feature selection to reduce dimensions.
+**Limitations:** Silhouette values were low across tested k, and post hoc proxy agreement was weak. This limits any claim of natural, discrete song groups.
 
-**Next steps:** Dimensionality reduction (e.g., PCA) or other interpretability (e.g., SHAP) if needed. The proxy task has shown the representation supports discrimination; next is to tie that to the actual recommendation use case.
+**Next steps:** Focus recommendation framing on similarity/ranking; use unsupervised outputs for feature diagnostics, optional segment discovery, and error analysis. If needed, test whether refined feature sets improve clustering clarity without overclaiming.
 
 ---
 
@@ -150,14 +158,14 @@ If this week's technique was a poor fit, explain:
 * Evidence supporting that conclusion
 * What value this attempt still provided
 
-Not a mismatch. SVM is a partial fit: the recommender is not a classifier, but the proxy task assesses whether the representation supports discrimination. ROC AUC shows how well the features separate high vs low energy. That informs whether the representation is useful for similarity-based recommendation. Linear SVM also gave interpretable feature weights, which adds value for understanding the representation.
+Not a full mismatch. Unsupervised learning was a partial fit: it did not produce strongly separated clusters, but it provided useful evidence that the feature space may be continuous/overlapping. That insight is valuable for task framing and supports a similarity-based recommendation perspective over hard segmentation.
 
 ---
 
 ## Submission Notes
 
 * Written submission format: **Markdown or PDF**
-* Code or notebooks: https://github.com/michael-d-abraham/Machine-learning-Standby-Predictor/blob/main/main.py
+* Code or notebooks: https://github.com/michael-d-abraham/Machine-learning-Standby-Predictor/blob/main/main_unsupervised_a10.py
 * Performance is **not** graded competitively
 * Clear reasoning and honest reflection matter more than results
 
