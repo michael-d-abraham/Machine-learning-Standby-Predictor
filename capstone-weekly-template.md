@@ -19,18 +19,17 @@ Provide the same short context each week so graders can orient quickly.
 
 ## 2. This Week's Technique and Its Assumptions
 
-* **Technique / Model Family Covered This Week:** Unsupervised learning with PCA and k-means clustering
+* **Technique / Model Family Covered This Week:** Practical deep learning systems (end-to-end training pipeline, environment/reproducibility, batched optimization, and observability—not architectural novelty)
+
 * **Key Assumptions of This Technique:**
-  * PCA captures major variance directions but does not prove natural classes
-  * k-means assumes centroid-based groups and Euclidean-distance structure
-  * Standardized features are important so one feature does not dominate distance
-  * Musical structure may overlap and be continuous, so weak clustering can still be informative
+  * A stable **software environment** (framework version, device choice) is part of the result, not an afterthought.
+  * **Train/validation discipline** matters: the same leakage-safe splits and preprocessing rules as the rest of the capstone should carry into the DL loop.
+  * **Monitoring** (loss curves, simple metrics) is how you detect overfitting, divergence, or implementation bugs—especially before scaling compute.
+  * **Tabular, medium-scale** data on one machine often does not need distributed training or serving infrastructure; many “systems” lessons still apply at laptop scope (seeds, logging, wall-clock).
 
 **Fit Assessment (required):**
 
-> I expected this technique to be a **partial** fit for my project because:
-
-My capstone goal is recommendation, not hard class prediction. Unsupervised methods are still useful for checking whether the current feature space has visible structure, gradients, or diffuse overlap. Even if cluster separation is weak, that outcome helps evaluate whether recommendation should emphasize similarity/ranking rather than strict segmentation.
+> Practical deep learning workflows are a **partial fit** for my project: they apply whenever I train a neural model, but my capstone data are **hand-engineered numeric features** (~23 columns, ~28k rows) with an **artist-group split**. The main engineering constraints are **reproducibility** and **honest generalization**, not building a large distributed stack. A small supervised proxy (binary energy) is enough to exercise the pipeline without pretending the recommender itself is solved by one classifier.
 
 ---
 
@@ -50,9 +49,9 @@ Examples include:
 
 * A proxy task
 
-* **Representation or Proxy Chosen:** Unsupervised feature matrix built from 23 numeric song-level features only. Excluded columns: `Unnamed: 0`, `artist_name`, `track_name`, `lyrics`, `genre`, `topic`, `release_date`, and `energy` (target/proxy source). Preprocessing: SimpleImputer (median) then StandardScaler.
+* **Representation or Proxy Chosen:** The same **23 numeric song-level features** used elsewhere (topic proportions + audio descriptors + `age`). Excluded: `Unnamed: 0`, `artist_name`, `track_name`, `lyrics`, `genre`, `topic`, `release_date`. **Target:** continuous `energy` binarized to high/low using the **training-set median only** (no test leakage), matching [`main.split_data`](main.py). Preprocessing: **SimpleImputer(median)** and **StandardScaler** fit **on training rows only**, then applied to val and test.
 
-* **Why this representation was reasonable for this week:** PCA and k-means both rely on numeric feature geometry, so scaling is required. Excluding text/meta/identifier columns and `energy` keeps the unsupervised matrix leakage-safe and aligned with project conventions. The existing high/low-energy proxy label was created separately from train median and used only post hoc for interpretation.
+* **Why this representation was reasonable for this week:** This week’s focus is the **training system** (loop, batches, device, logging). A fixed tabular tensor after sklearn preprocessing mirrors how many production pipelines wrap classical feature engineering before a neural head. Raw lyrics/audio end-to-end modeling would be a different (much larger) system scope.
 
 ---
 
@@ -61,13 +60,13 @@ Examples include:
 Be concrete and scoped. Do not list everything you *could* have done.
 
 * What you implemented this week
-Built a scoped unsupervised workflow in `main_unsupervised_a10.py`: load data, define included/excluded columns, preprocess with median imputation + scaling, run PCA, and run k-means for multiple k values (`k=2..7`) with inertia and silhouette reporting. Produced plots (explained variance, PCA scatter by cluster, PCA scatter by proxy label, elbow, silhouette). For selected k, generated cluster size and feature-profile summaries using standardized mean differences.
+Implemented [`assignment12_dl_systems.py`](assignment12_dl_systems.py): loads `tcc_ceds_music.csv`, uses **`main.inspect_dataset`** and **`main.split_data`** for the **artist-based 60/20/20 split** and **median-derived binary label**, fits **imputer + scaler on train only**, then trains a **small PyTorch MLP** (23-64-32-1 logits) with **Adam**, **BCE-with-logits**, **batch size 256**, **40 epochs**, fixed **seed 42**. Each epoch logs **mean train loss** and **validation loss** plus **validation ROC-AUC**. Run metadata and tail of metrics are written to **`assignment12_dl_run.json`**. Device is **CPU** on my run (GPU not required for this scope).
 
 * What you intentionally did *not* attempt and why
-Did not use deep learning or advanced clustering variants (GMM/DBSCAN/spectral) to keep scope student-readable and aligned with assignment instructions. Did not use the proxy label in fitting PCA or k-means. Did not treat clustering as a replacement for supervised proxy evaluation.
+Did **not** add distributed training, hyperparameter search, model serving, or cloud experiment tracking—to keep the assignment scoped to **single-machine** “systems hygiene.” Did **not** train on raw text or waveforms; the capstone representation stays **tabular** for comparability with prior assignments.
 
 * Any constraints encountered (data, labels, compute, time)
-Recommendation has no single ground-truth label, so unsupervised evaluation is inherently indirect. k-means quality metrics were modest, which limits strong segmentation claims. Matplotlib cache/font warnings appeared in this environment but did not block output generation.
+Full recommender **ground truth** is still absent; the energy task remains a **proxy** for reasoning about features and generalization. Training is **fast on CPU** for this net (~seconds); the bottleneck for a real DL system here would be **data/modeling choices**, not cluster scale.
 
 ---
 
@@ -82,30 +81,13 @@ Examples:
 * Error patterns
 * Unexpected behaviors
 
-**PCA variance structure (first 10 components):**
-- PC1: 0.1203
-- PC2: 0.0756
-- Cumulative variance by PC10: 0.5938
+**Data split (artist-group):** Train **16,615** / Val **5,616** / Test **6,141** rows; **23** features after exclusions.
 
-**k-means sweep (`k=2..7`):**
-- k=2: silhouette 0.0867
-- k=3: silhouette 0.0729
-- k=4: silhouette 0.0771
-- k=5: silhouette 0.0877
-- k=6: silhouette 0.1044
-- k=7: silhouette 0.1157 (best among tested)
+**Environment / run config (from `assignment12_dl_run.json`):** PyTorch **2.11.0**, **CPU**, seed **42**, batch **256**, lr **0.001**, hidden **(64, 32)**, **40** epochs. Wall-clock for the full train+eval loop about **3.5 s** on this machine.
 
-**Selected k:** 7 (based on highest tested silhouette, while noting absolute values are low)
+**Training behavior:** Train loss decreased steadily (about **0.56** to **0.28**). Validation ROC-AUC rose quickly then plateaued (about **0.918** epoch 1 to **~0.941-0.943** mid-run). Validation loss **bottomed early** then **crept upward** while train loss kept falling, which is a typical **mild overfitting** signal; not tuned aggressively per assignment intent.
 
-**Post hoc cluster vs proxy-energy agreement (interpretive only):**
-- NMI: 0.0301
-- ARI: 0.0216
-
-**Qualitative cluster-profile examples (standardized means):**
-- One cluster was high in `romantic` (+3.210), with higher `acousticness` and older `age`
-- One cluster was high in `music` (+2.776)
-- One cluster was high in `night/time` (+3.000)
-- One cluster was high in `obscene` (+1.936) and `danceability`
+**Held-out test:** ROC-AUC about **0.939** (single run, not competitive benchmarking).
 
 ---
 
@@ -121,17 +103,17 @@ Reflect on:
 
 **Why the method behaved as it did:**
 
-PCA spread variance across many components instead of concentrating it strongly in the first two. k-means produced only low silhouette values across all tested k, with the best at k=7 still weak in absolute terms. This suggests the feature space has overlapping or gradient-like structure rather than cleanly separable groups.
+The network fit the proxy task quickly because the inputs are **dense numeric summaries** already aligned with `energy`. The **artist split** still enforces nontrivial generalization (no shared artists across splits). The **train/val loss gap** suggests extra capacity and epochs mainly **memorize train noise** rather than unlock new “structure”—consistent with a **partial** case for deep models on this **fixed feature matrix**.
 
-**Interpretability:**
+**Systems assumptions that held:**
 
-- PCA plots gave an interpretable low-dimensional view of overlap and diffuse structure
-- Cluster profiles still provided useful broad musical tendencies (e.g., romantic/acoustic, night/time-heavy, danceable/obscene profiles)
-- Post hoc label agreement stayed very low (NMI/ARI near zero), indicating clusters are not just re-encoding the high/low-energy proxy
+**Reproducibility** (seed), **explicit device**, **batched training**, and **JSON logging** made runs **inspectable** and **comparable**—this is the core “practical systems” takeaway for a small project.
 
 **What this reveals:**
 
-Unsupervised learning is a **partial fit**: useful for exploration and diagnostics, but weak as a standalone segmentation strategy. The results support framing recommendation more as similarity/ranking in feature space than hard cluster assignment. Weak clustering is still informative because it exposes limitations in the assumption that songs naturally split into clear groups.
+Practical DL **infrastructure** (loop + metrics + artifacts) is **portable** even when the **model** is tiny. For this capstone, the harder constraint remains **evaluation framing** (proxy labels, artist leakage) rather than **framework choice**. End-to-end audio or text DL would shift the systems problem toward **data volume, I/O, and labeling**—not applicable as a full build **at this stage** without expanding scope.
+
+This suggests that while a neural net can match strong tabular baselines here, the **marginal value** of deep learning is often in **pipeline discipline** and **future representation learning**, not a deeper MLP on the same 23 columns.
 
 ---
 
@@ -142,11 +124,11 @@ Answer **one** of the following:
 * What will you keep, change, or discard before the next assignment?
 * What would you try next if data or resources were not constrained?
 
-I'll keep the same preprocessing (median imputation + StandardScaler) and leakage-safe split philosophy. I will keep using PCA/clustering as exploratory diagnostics rather than primary recommender logic.
+I'll **keep** the **artist-group split** and **median-only thresholding** for any future neural experiments. I'll **keep** small JSON run logs for reproducibility.
 
-**Limitations:** Silhouette values were low across tested k, and post hoc proxy agreement was weak. This limits any claim of natural, discrete song groups.
+**Limitations:** One short run; no early stopping or tuned regularization—intentionally minimal.
 
-**Next steps:** Focus recommendation framing on similarity/ranking; use unsupervised outputs for feature diagnostics, optional segment discovery, and error analysis. If needed, test whether refined feature sets improve clustering clarity without overclaiming.
+**Next steps:** If expanding later: **early stopping**, weight decay, or a **learned embedding** from audio/text—only if the task moves beyond fixed tabular features. For recommendation itself, continue to emphasize **similarity/ranking** rather than a single proxy classifier score.
 
 ---
 
@@ -158,14 +140,13 @@ If this week's technique was a poor fit, explain:
 * Evidence supporting that conclusion
 * What value this attempt still provided
 
-Not a full mismatch. Unsupervised learning was a partial fit: it did not produce strongly separated clusters, but it provided useful evidence that the feature space may be continuous/overlapping. That insight is valuable for task framing and supports a similarity-based recommendation perspective over hard segmentation.
+Not a full mismatch. **Distributed training, production serving, and large-scale experiment platforms** are **not applicable for this project at this stage**—dataset size and modality do not justify that machinery yet. The value of this week is practicing **disciplined training loops** and **honest fit assessment** on real capstone splits; the small MLP is a **vehicle** for that systems thinking, not a claim of SOTA recommendation.
 
 ---
 
 ## Submission Notes
 
 * Written submission format: **Markdown or PDF**
-* Code or notebooks: https://github.com/michael-d-abraham/Machine-learning-Standby-Predictor/blob/main/main_unsupervised_a10.py
+* Code or notebooks: [`assignment12_dl_systems.py`](https://github.com/michael-d-abraham/Machine-learning-Standby-Predictor/blob/main/assignment12_dl_systems.py) (run produces [`assignment12_dl_run.json`](https://github.com/michael-d-abraham/Machine-learning-Standby-Predictor/blob/main/assignment12_dl_run.json))
 * Performance is **not** graded competitively
 * Clear reasoning and honest reflection matter more than results
-

@@ -1,0 +1,6 @@
+# Capstone: Machine-learning-Standby-Predictor
+pandas>=1.3
+numpy>=1.21
+scikit-learn>=1.0
+matplotlib>=3.5
+torch>=2.0
