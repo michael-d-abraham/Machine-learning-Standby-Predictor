@@ -5,7 +5,7 @@ Small feedforward net in PyTorch; same data split and preprocessing philosophy a
 artist-based 60/20/20, binary target from train median only, median impute + scaler fit on train.
 
 System-level focus: reproducibility (seeds), explicit device, train/val observability,
-batching, wall-clock, optional JSON artifact (no performance chasing).
+batching, wall-clock, JSON artifact with full per-epoch history, and training-curve PNG.
 """
 
 from __future__ import annotations
@@ -14,6 +14,10 @@ import json
 import time
 from pathlib import Path
 
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
@@ -30,7 +34,9 @@ BATCH_SIZE = 256
 MAX_EPOCHS = 40
 LEARNING_RATE = 1e-3
 HIDDEN = (64, 32)
-OUTPUT_JSON = Path(__file__).resolve().parent / "assignment12_dl_run.json"
+_ROOT = Path(__file__).resolve().parent
+OUTPUT_JSON = _ROOT / "assignment12_dl_run.json"
+OUTPUT_CURVES_PNG = _ROOT / "assignment12_train_val_curves.png"
 
 
 def _set_seeds(seed: int) -> None:
@@ -69,6 +75,29 @@ def _fit_preprocess(
     X_val_t = scaler.transform(X_val_t)
     X_test_t = scaler.transform(X_test_t)
     return X_train_t, X_val_t, X_test_t
+
+
+def _save_training_curves(history: list[dict], path: Path) -> None:
+    """Train/val loss and val ROC-AUC vs epoch (stability, overfitting at a glance)."""
+    if not history:
+        return
+    epochs = [h["epoch"] for h in history]
+    fig, (ax_loss, ax_auc) = plt.subplots(2, 1, figsize=(8, 7), sharex=True)
+    ax_loss.plot(epochs, [h["train_loss"] for h in history], label="train_loss", color="tab:blue")
+    ax_loss.plot(epochs, [h["val_loss"] for h in history], label="val_loss", color="tab:orange")
+    ax_loss.set_ylabel("Loss")
+    ax_loss.set_title("Assignment 12: training curves (proxy energy classifier)")
+    ax_loss.legend()
+    ax_loss.grid(True, alpha=0.3)
+    ax_auc.plot(epochs, [h["val_roc_auc"] for h in history], label="val_roc_auc", color="tab:green")
+    ax_auc.set_xlabel("Epoch")
+    ax_auc.set_ylabel("Val ROC-AUC")
+    ax_auc.legend()
+    ax_auc.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(path, dpi=150)
+    plt.close()
+    print(f"Saved: {path}")
 
 
 def run() -> dict:
@@ -169,7 +198,12 @@ def run() -> dict:
         "last_epoch": history[-1],
     }
 
-    payload = {"meta": meta, "history_tail": history[-5:]}
+    _save_training_curves(history, OUTPUT_CURVES_PNG)
+    payload = {
+        "meta": meta,
+        "history": history,
+        "history_tail": history[-5:],
+    }
     OUTPUT_JSON.write_text(json.dumps(payload, indent=2))
     print(f"Wrote {OUTPUT_JSON}")
     print(f"Wall clock (train+eval loop): {wall_s:.2f}s on {device}")
